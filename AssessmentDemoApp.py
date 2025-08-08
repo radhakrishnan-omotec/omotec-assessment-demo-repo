@@ -7,6 +7,7 @@ from datetime import datetime
 import logging
 import sys
 import urllib.parse
+import subprocess
 
 # Configure logging for Streamlit Cloud
 logging.basicConfig(
@@ -323,7 +324,6 @@ def evaluator_section(df_main):
                                     all_courses_filled = False
 
                             level_status_key = f"{level}_status_{evaluator_role}"
-                            # Only allow QUALIFIED if all courses are filled and passed
                             status_options = ["NOT QUALIFIED"] if not all_courses_filled else ["QUALIFIED", "NOT QUALIFIED"]
                             status = st.selectbox(f"{level} Status", status_options, key=level_status_key)
 
@@ -456,6 +456,90 @@ def evaluator_section(df_main):
                 updated_df = pd.concat([df_main, pd.DataFrame([entry])], ignore_index=True)
                 updated_df.to_csv(CSV_FILE, index=False)
                 st.success(f"✅ Assessment Saved for Trainer ID: {trainer_id}")
+
+                # Add download options for submitted assessment
+                st.markdown("### 📥 Download Submitted Assessment")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("📊 Download as CSV", key=f"download_eval_csv_{trainer_id}"):
+                        try:
+                            csv_data = pd.DataFrame([entry]).to_csv(index=False)
+                            st.download_button(
+                                label="Download Assessment CSV",
+                                data=csv_data,
+                                file_name=f"assessment_{trainer_id}_{datetime.now().strftime('%Y%m%d')}.csv",
+                                mime="text/csv",
+                                key=f"download_button_eval_csv_{trainer_id}"
+                            )
+                            st.success("CSV download initiated.")
+                        except Exception as e:
+                            logger.error(f"Error downloading CSV: {str(e)}")
+                            st.error("Failed to download CSV file.")
+                with col2:
+                    if st.button("📄 Download as PDF", key=f"download_eval_pdf_{trainer_id}"):
+                        try:
+                            latex_content = r"""
+                            \documentclass{article}
+                            \usepackage[utf8]{inputenc}
+                            \usepackage{geometry}
+                            \geometry{a4paper, margin=1in}
+                            \usepackage{longtable}
+                            \usepackage{booktabs}
+                            
+                            \begin{document}
+                            
+                            \section*{Trainer Assessment Report}
+                            \subsection*{Generated on: """ + datetime.now().strftime("%d-%m-%Y %I:%M %p IST") + r"""}
+                            \subsection*{Trainer: """ + trainer_name + r""" (ID: """ + trainer_id + r""")}
+                            \subsection*{Evaluator: """ + evaluator_username + r""" (""" + evaluator_role + r""")}
+                            
+                            \begin{longtable}{l l l l l l l l l l l}
+                            \toprule
+                            Date of Assessment & L1 TOTAL & L1 AVERAGE & L1 STATUS & L2 TOTAL & L2 AVERAGE & L2 STATUS & L3 TOTAL & L3 AVERAGE & L3 STATUS & Manager Referral \\
+                            \midrule
+                            """ + f"{entry['Date of assessment']} & {entry.get('LEVEL #1 TOTAL', 'N/A')} & {entry.get('LEVEL #1 AVERAGE', 'N/A')} & {entry.get('LEVEL #1 STATUS', 'N/A')} & {entry.get('LEVEL #2 TOTAL', 'N/A')} & {entry.get('LEVEL #2 AVERAGE', 'N/A')} & {entry.get('LEVEL #2 STATUS', 'N/A')} & {entry.get('LEVEL #3 TOTAL', 'N/A')} & {entry.get('LEVEL #3 AVERAGE', 'N/A')} & {entry.get('LEVEL #3 STATUS', 'N/A')} & {entry.get('Manager Referral', 'N/A')} \\\\\n" + r"""
+                            \bottomrule
+                            \end{longtable}
+                            
+                            \newpage
+                            
+                            \section*{Course Details}
+                            """ + "".join([
+                                r"\subsection*{" + level + r"}" + "\n" +
+                                r"\begin{longtable}{l l}" + "\n" +
+                                r"\toprule" + "\n" +
+                                r"Course & Name \\" + "\n" +
+                                r"\midrule" + "\n" +
+                                "".join([f"{level} Course #{i} & {entry.get(f'{level} Course #{i}', 'N/A')} \\\\\n" for i in range(1, 11)]) +
+                                r"\bottomrule" + "\n" +
+                                r"\end{longtable}" + "\n"
+                                for level in ["LEVEL #1", "LEVEL #2", "LEVEL #3"]
+                            ]) + r"""
+                            
+                            \end{document}
+                            """
+                            with open("eval_report.tex", "w") as f:
+                                f.write(latex_content)
+                            subprocess.run(["pdflatex", "eval_report.tex"], check=True, capture_output=True)
+                            with open("eval_report.pdf", "rb") as f:
+                                pdf_data = f.read()
+                            st.download_button(
+                                label="Download Assessment PDF",
+                                data=pdf_data,
+                                file_name=f"assessment_{trainer_id}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                mime="application/pdf",
+                                key=f"download_button_eval_pdf_{trainer_id}"
+                            )
+                            st.success("PDF download initiated.")
+                            for file in ["eval_report.tex", "eval_report.pdf", "eval_report.aux", "eval_report.log"]:
+                                if os.path.exists(file):
+                                    os.remove(file)
+                        except subprocess.CalledProcessError as e:
+                            logger.error(f"Error compiling LaTeX to PDF: {str(e)}")
+                            st.error("Failed to compile PDF report. Ensure pdflatex is installed.")
+                        except Exception as e:
+                            logger.error(f"Error generating PDF: {str(e)}")
+                            st.error("Failed to generate PDF report.")
             except Exception as e:
                 logger.error(f"Error submitting evaluation: {str(e)}")
                 st.error("Failed to submit evaluation. Please try again.")
@@ -536,10 +620,15 @@ def viewer_section(df_main):
             with col1:
                 if st.button("📥 Download Trainer Data as CSV", key="download_csv"):
                     try:
-                        csv = trainer_report.to_csv(index=False)
-                        b64 = base64.b64encode(csv.encode()).decode()
-                        href = f'<a href="data:file/csv;base64,{b64}" download="trainer_{trainer_id}_assessment.csv">Download CSV File</a>'
-                        st.markdown(href, unsafe_allow_html=True)
+                        csv_data = trainer_report.to_csv(index=False)
+                        st.download_button(
+                            label="Download Trainer CSV",
+                            data=csv_data,
+                            file_name=f"trainer_{trainer_id}_assessment.csv",
+                            mime="text/csv",
+                            key=f"download_button_csv_{trainer_id}"
+                        )
+                        st.success("CSV download initiated.")
                     except Exception as e:
                         logger.error(f"Error downloading CSV: {str(e)}")
                         st.error("Failed to download CSV file.")
@@ -560,27 +649,50 @@ def viewer_section(df_main):
                         \subsection*{Generated on: """ + datetime.now().strftime("%d-%m-%Y %I:%M %p IST") + r"""}
                         \subsection*{Trainer: """ + trainer_name + r""" (ID: """ + trainer_id + r""")}
                         
-                        \begin{longtable}{l l l l l l}
+                        \begin{longtable}{l l l l l l l l l l l}
                         \toprule
-                        Date of Assessment & LEVEL #1 TOTAL & LEVEL #1 AVERAGE & LEVEL #1 STATUS & LEVEL #1 & LEVEL #2 \\
+                        Date of Assessment & L1 TOTAL & L1 AVERAGE & L1 STATUS & L2 TOTAL & L2 AVERAGE & L2 STATUS & L3 TOTAL & L3 AVERAGE & L3 STATUS & Manager Referral \\
                         \midrule
-                        """ + "".join([f"{row['Date of assessment']} & {row['LEVEL #1 TOTAL']} & {row['LEVEL #1 AVERAGE']} & {row['LEVEL #1 STATUS']} & {row['LEVEL #1']} & {row['LEVEL #2']} \\\\\n" for _, row in trainer_report.iterrows()]) + r"""
+                        """ + "".join([f"{row['Date of assessment']} & {row['LEVEL #1 TOTAL']} & {row['LEVEL #1 AVERAGE']} & {row['LEVEL #1 STATUS']} & {row['LEVEL #2 TOTAL']} & {row['LEVEL #2 AVERAGE']} & {row['LEVEL #2 STATUS']} & {row['LEVEL #3 TOTAL']} & {row['LEVEL #3 AVERAGE']} & {row['LEVEL #3 STATUS']} & {row.get('Manager Referral', 'N/A')} \\\\\n" for _, row in trainer_report.iterrows()]) + r"""
                         \bottomrule
                         \end{longtable}
+                        
+                        \newpage
+                        
+                        \section*{Course Details}
+                        """ + "".join([
+                            r"\subsection*{" + level + r"}" + "\n" +
+                            r"\begin{longtable}{l l}" + "\n" +
+                            r"\toprule" + "\n" +
+                            r"Course & Name \\" + "\n" +
+                            r"\midrule" + "\n" +
+                            "".join([f"{level} Course #{i} & {row.get(f'{level} Course #{i}', 'N/A')} \\\\\n" for i in range(1, 11)]) +
+                            r"\bottomrule" + "\n" +
+                            r"\end{longtable}" + "\n"
+                            for level in ["LEVEL #1", "LEVEL #2", "LEVEL #3"] for _, row in [trainer_report.iloc[-1:]]
+                        ]) + r"""
                         
                         \end{document}
                         """
                         with open("trainer_report.tex", "w") as f:
                             f.write(latex_content)
-                        with open("trainer_report.tex", "rb") as f:
+                        subprocess.run(["pdflatex", "trainer_report.tex"], check=True, capture_output=True)
+                        with open("trainer_report.pdf", "rb") as f:
                             pdf_data = f.read()
                         st.download_button(
-                            label="Download Trainer Data as PDF",
+                            label="Download Trainer PDF",
                             data=pdf_data,
                             file_name=f"trainer_{trainer_id}_assessment.pdf",
-                            mime="application/x-latex"
+                            mime="application/pdf",
+                            key=f"download_button_pdf_{trainer_id}"
                         )
                         st.success("PDF download initiated.")
+                        for file in ["trainer_report.tex", "trainer_report.pdf", "trainer_report.aux", "trainer_report.log"]:
+                            if os.path.exists(file):
+                                os.remove(file)
+                    except subprocess.CalledProcessError as e:
+                        logger.error(f"Error compiling LaTeX to PDF: {str(e)}")
+                        st.error("Failed to compile PDF report. Ensure pdflatex is installed.")
                     except Exception as e:
                         logger.error(f"Error generating PDF: {str(e)}")
                         st.error("Failed to generate PDF report.")
@@ -600,7 +712,7 @@ def viewer_section(df_main):
         if st.button("Logout", key="viewer_logout"):
             try:
                 for key in ["logged_in", "role", "logged_user"]:
-                    if key in st.session_state:
+                    if st.session_state.get(key):
                         del st.session_state[key]
                 st.success("Logged out successfully!")
                 st.rerun()
@@ -749,19 +861,37 @@ def admin_section(df_main):
 
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.download_button(
-                        label="Download Trainer Report CSV",
-                        data=trainer_reports.to_csv(index=False),
-                        file_name=f"trainer_{selected_trainer}_reports.csv"
-                    )
+                    if st.button("📥 Download Trainer Report CSV", key=f"download_trainer_csv_{selected_trainer}"):
+                        try:
+                            csv_data = trainer_reports.to_csv(index=False)
+                            st.download_button(
+                                label="Download Trainer Report CSV",
+                                data=csv_data,
+                                file_name=f"trainer_{selected_trainer}_reports.csv",
+                                mime="text/csv",
+                                key=f"download_button_trainer_csv_{selected_trainer}"
+                            )
+                            st.success("CSV download initiated.")
+                        except Exception as e:
+                            logger.error(f"Error downloading CSV: {str(e)}")
+                            st.error("Failed to download CSV file.")
                 with col2:
-                    st.download_button(
-                        label="Download All Filtered Reports CSV",
-                        data=filtered.to_csv(index=False),
-                        file_name="filtered_trainer_reports.csv"
-                    )
+                    if st.button("📥 Download All Filtered Reports CSV", key="download_filtered_csv"):
+                        try:
+                            csv_data = filtered.to_csv(index=False)
+                            st.download_button(
+                                label="Download All Filtered Reports CSV",
+                                data=csv_data,
+                                file_name="filtered_trainer_reports.csv",
+                                mime="text/csv",
+                                key="download_button_filtered_csv"
+                            )
+                            st.success("CSV download initiated.")
+                        except Exception as e:
+                            logger.error(f"Error downloading CSV: {str(e)}")
+                            st.error("Failed to download CSV file.")
                 with col3:
-                    if st.button("Download Evaluators/Trainers PDF"):
+                    if st.button("📄 Download Evaluators/Trainers PDF", key="download_admin_pdf"):
                         try:
                             latex_content = r"""
                             \documentclass{article}
@@ -795,14 +925,27 @@ def admin_section(df_main):
 
                             \end{document}
                             """
-                            with open("report.tex", "w") as f:
+                            with open("admin_report.tex", "w") as f:
                                 f.write(latex_content)
-                            with open("report.tex", "rb") as f:
-                                b64 = base64.b64encode(f.read()).decode()
-                                href = f'<a href="data:application/x-latex;base64,{b64}" download="evaluators_trainers_report.pdf">Download PDF</a>'
-                            st.markdown(href, unsafe_allow_html=True)
+                            subprocess.run(["pdflatex", "admin_report.tex"], check=True, capture_output=True)
+                            with open("admin_report.pdf", "rb") as f:
+                                pdf_data = f.read()
+                            st.download_button(
+                                label="Download Evaluators/Trainers PDF",
+                                data=pdf_data,
+                                file_name="evaluators_trainers_report.pdf",
+                                mime="application/pdf",
+                                key="download_button_admin_pdf"
+                            )
+                            st.success("PDF download initiated.")
+                            for file in ["admin_report.tex", "admin_report.pdf", "admin_report.aux", "admin_report.log"]:
+                                if os.path.exists(file):
+                                    os.remove(file)
+                        except subprocess.CalledProcessError as e:
+                            logger.error(f"Error compiling LaTeX to PDF: {str(e)}")
+                            st.error("Failed to compile PDF report. Ensure pdflatex is installed.")
                         except Exception as e:
-                            logger.error(f"Error generating PDF report: {str(e)}")
+                            logger.error(f"Error generating PDF: {str(e)}")
                             st.error("Failed to generate PDF report.")
 
         if st.button("Logout", key="admin_logout"):
