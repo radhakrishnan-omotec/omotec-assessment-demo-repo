@@ -842,7 +842,12 @@ def admin_section(df_main):
             st.markdown("---")
             st.markdown("### 📋 Trainer Reports Overview")
 
-            trainer_filter = st.text_input("Filter by Trainer Name or ID", "")
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                trainer_filter = st.text_input("Filter by Trainer Name or ID", "")
+            with col2:
+                display_trainers = st.button("Display Matching Trainers")
+            
             filtered = df_main.copy()
             if trainer_filter:
                 try:
@@ -853,8 +858,9 @@ def admin_section(df_main):
                     logger.error(f"Error filtering trainers: {str(e)}")
                     st.error("Failed to apply trainer filter.")
 
-            st.markdown("#### Matching Trainer Assessments")
-            st.dataframe(filtered)
+            if display_trainers and not filtered.empty:
+                st.markdown("#### Matching Trainer Assessments")
+                st.dataframe(filtered)
 
             trainer_ids = sorted(filtered["Trainer ID"].dropna().unique().tolist())
             selected_trainer = st.selectbox("Select Trainer for Detailed Report", [""] + trainer_ids)
