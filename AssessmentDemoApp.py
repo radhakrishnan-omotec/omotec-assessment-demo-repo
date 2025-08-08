@@ -7,7 +7,11 @@ from datetime import datetime
 import logging
 import sys
 import urllib.parse
-import subprocess
+from io import BytesIO
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib.units import inch
+from reportlab.lib import colors
 
 # Configure logging for Streamlit Cloud
 logging.basicConfig(
@@ -461,85 +465,77 @@ def evaluator_section(df_main):
                 st.markdown("### 📥 Download Submitted Assessment")
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.button("📊 Download as CSV", key=f"download_eval_csv_{trainer_id}"):
-                        try:
-                            csv_data = pd.DataFrame([entry]).to_csv(index=False)
-                            st.download_button(
-                                label="Download Assessment CSV",
-                                data=csv_data,
-                                file_name=f"assessment_{trainer_id}_{datetime.now().strftime('%Y%m%d')}.csv",
-                                mime="text/csv",
-                                key=f"download_button_eval_csv_{trainer_id}"
-                            )
-                            st.success("CSV download initiated.")
-                        except Exception as e:
-                            logger.error(f"Error downloading CSV: {str(e)}")
-                            st.error("Failed to download CSV file.")
+                    csv_data = pd.DataFrame([entry]).to_csv(index=False)
+                    st.download_button(
+                        label="Download Assessment CSV",
+                        data=csv_data,
+                        file_name=f"assessment_{trainer_id}_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv",
+                        key=f"download_button_eval_csv_{trainer_id}"
+                    )
                 with col2:
-                    if st.button("📄 Download as PDF", key=f"download_eval_pdf_{trainer_id}"):
-                        try:
-                            latex_content = r"""
-                            \documentclass{article}
-                            \usepackage[utf8]{inputenc}
-                            \usepackage{geometry}
-                            \geometry{a4paper, margin=1in}
-                            \usepackage{longtable}
-                            \usepackage{booktabs}
-                            
-                            \begin{document}
-                            
-                            \section*{Trainer Assessment Report}
-                            \subsection*{Generated on: """ + datetime.now().strftime("%d-%m-%Y %I:%M %p IST") + r"""}
-                            \subsection*{Trainer: """ + trainer_name + r""" (ID: """ + trainer_id + r""")}
-                            \subsection*{Evaluator: """ + evaluator_username + r""" (""" + evaluator_role + r""")}
-                            
-                            \begin{longtable}{l l l l l l l l l l l}
-                            \toprule
-                            Date of Assessment & L1 TOTAL & L1 AVERAGE & L1 STATUS & L2 TOTAL & L2 AVERAGE & L2 STATUS & L3 TOTAL & L3 AVERAGE & L3 STATUS & Manager Referral \\
-                            \midrule
-                            """ + f"{entry['Date of assessment']} & {entry.get('LEVEL #1 TOTAL', 'N/A')} & {entry.get('LEVEL #1 AVERAGE', 'N/A')} & {entry.get('LEVEL #1 STATUS', 'N/A')} & {entry.get('LEVEL #2 TOTAL', 'N/A')} & {entry.get('LEVEL #2 AVERAGE', 'N/A')} & {entry.get('LEVEL #2 STATUS', 'N/A')} & {entry.get('LEVEL #3 TOTAL', 'N/A')} & {entry.get('LEVEL #3 AVERAGE', 'N/A')} & {entry.get('LEVEL #3 STATUS', 'N/A')} & {entry.get('Manager Referral', 'N/A')} \\\\\n" + r"""
-                            \bottomrule
-                            \end{longtable}
-                            
-                            \newpage
-                            
-                            \section*{Course Details}
-                            """ + "".join([
-                                r"\subsection*{" + level + r"}" + "\n" +
-                                r"\begin{longtable}{l l}" + "\n" +
-                                r"\toprule" + "\n" +
-                                r"Course & Name \\" + "\n" +
-                                r"\midrule" + "\n" +
-                                "".join([f"{level} Course #{i} & {entry.get(f'{level} Course #{i}', 'N/A')} \\\\\n" for i in range(1, 11)]) +
-                                r"\bottomrule" + "\n" +
-                                r"\end{longtable}" + "\n"
-                                for level in ["LEVEL #1", "LEVEL #2", "LEVEL #3"]
-                            ]) + r"""
-                            
-                            \end{document}
-                            """
-                            with open("eval_report.tex", "w") as f:
-                                f.write(latex_content)
-                            subprocess.run(["pdflatex", "eval_report.tex"], check=True, capture_output=True)
-                            with open("eval_report.pdf", "rb") as f:
-                                pdf_data = f.read()
-                            st.download_button(
-                                label="Download Assessment PDF",
-                                data=pdf_data,
-                                file_name=f"assessment_{trainer_id}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                                mime="application/pdf",
-                                key=f"download_button_eval_pdf_{trainer_id}"
-                            )
-                            st.success("PDF download initiated.")
-                            for file in ["eval_report.tex", "eval_report.pdf", "eval_report.aux", "eval_report.log"]:
-                                if os.path.exists(file):
-                                    os.remove(file)
-                        except subprocess.CalledProcessError as e:
-                            logger.error(f"Error compiling LaTeX to PDF: {str(e)}")
-                            st.error("Failed to compile PDF report. Ensure pdflatex is installed.")
-                        except Exception as e:
-                            logger.error(f"Error generating PDF: {str(e)}")
-                            st.error("Failed to generate PDF report.")
+                    try:
+                        buffer = BytesIO()
+                        pdf = canvas.Canvas(buffer, pagesize=A4)
+                        pdf.setFont("Helvetica", 12)
+                        y = 750
+                        pdf.drawString(100, y, f"Trainer Assessment Report")
+                        y -= 20
+                        pdf.drawString(100, y, f"Generated on: {datetime.now().strftime('%d-%m-%Y %I:%M %p IST')}")
+                        y -= 20
+                        pdf.drawString(100, y, f"Trainer: {trainer_name} (ID: {trainer_id})")
+                        y -= 20
+                        pdf.drawString(100, y, f"Evaluator: {evaluator_username} ({evaluator_role})")
+                        y -= 30
+                        pdf.drawString(100, y, "Assessment Summary")
+                        y -= 20
+                        pdf.drawString(100, y, f"Date of Assessment: {entry['Date of assessment']}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #1 TOTAL: {entry.get('LEVEL #1 TOTAL', 'N/A')}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #1 AVERAGE: {entry.get('LEVEL #1 AVERAGE', 'N/A')}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #1 STATUS: {entry.get('LEVEL #1 STATUS', 'N/A')}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #2 TOTAL: {entry.get('LEVEL #2 TOTAL', 'N/A')}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #2 AVERAGE: {entry.get('LEVEL #2 AVERAGE', 'N/A')}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #2 STATUS: {entry.get('LEVEL #2 STATUS', 'N/A')}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #3 TOTAL: {entry.get('LEVEL #3 TOTAL', 'N/A')}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #3 AVERAGE: {entry.get('LEVEL #3 AVERAGE', 'N/A')}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #3 STATUS: {entry.get('LEVEL #3 STATUS', 'N/A')}")
+                        y -= 20
+                        pdf.drawString(100, y, f"Manager Referral: {entry.get('Manager Referral', 'N/A')}")
+                        y -= 30
+                        for level in ["LEVEL #1", "LEVEL #2", "LEVEL #3"]:
+                            pdf.drawString(100, y, f"{level} Courses")
+                            y -= 20
+                            for i in range(1, 11):
+                                course = entry.get(f"{level} Course #{i}", "N/A")
+                                pdf.drawString(100, y, f"Course #{i}: {course}")
+                                y -= 20
+                                if y < 50:
+                                    pdf.showPage()
+                                    pdf.setFont("Helvetica", 12)
+                                    y = 750
+                        pdf.showPage()
+                        pdf.save()
+                        pdf_data = buffer.getvalue()
+                        buffer.close()
+                        st.download_button(
+                            label="Download Assessment PDF",
+                            data=pdf_data,
+                            file_name=f"assessment_{trainer_id}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                            mime="application/pdf",
+                            key=f"download_button_eval_pdf_{trainer_id}"
+                        )
+                    except Exception as e:
+                        logger.error(f"Error generating PDF: {str(e)}")
+                        st.error("Failed to generate PDF report.")
             except Exception as e:
                 logger.error(f"Error submitting evaluation: {str(e)}")
                 st.error("Failed to submit evaluation. Please try again.")
@@ -618,84 +614,80 @@ def viewer_section(df_main):
         if trainer_name and not trainer_report.empty:
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("📥 Download Trainer Data as CSV", key="download_csv"):
-                    try:
-                        csv_data = trainer_report.to_csv(index=False)
-                        st.download_button(
-                            label="Download Trainer CSV",
-                            data=csv_data,
-                            file_name=f"trainer_{trainer_id}_assessment.csv",
-                            mime="text/csv",
-                            key=f"download_button_csv_{trainer_id}"
-                        )
-                        st.success("CSV download initiated.")
-                    except Exception as e:
-                        logger.error(f"Error downloading CSV: {str(e)}")
-                        st.error("Failed to download CSV file.")
+                csv_data = trainer_report.to_csv(index=False)
+                st.download_button(
+                    label="Download Trainer CSV",
+                    data=csv_data,
+                    file_name=f"trainer_{trainer_id}_assessment.csv",
+                    mime="text/csv",
+                    key=f"download_button_csv_{trainer_id}"
+                )
             with col2:
-                if st.button("📄 Download Trainer Data as PDF", key="download_pdf"):
-                    try:
-                        latex_content = r"""
-                        \documentclass{article}
-                        \usepackage[utf8]{inputenc}
-                        \usepackage{geometry}
-                        \geometry{a4paper, margin=1in}
-                        \usepackage{longtable}
-                        \usepackage{booktabs}
-                        
-                        \begin{document}
-                        
-                        \section*{Trainer Assessment Report}
-                        \subsection*{Generated on: """ + datetime.now().strftime("%d-%m-%Y %I:%M %p IST") + r"""}
-                        \subsection*{Trainer: """ + trainer_name + r""" (ID: """ + trainer_id + r""")}
-                        
-                        \begin{longtable}{l l l l l l l l l l l}
-                        \toprule
-                        Date of Assessment & L1 TOTAL & L1 AVERAGE & L1 STATUS & L2 TOTAL & L2 AVERAGE & L2 STATUS & L3 TOTAL & L3 AVERAGE & L3 STATUS & Manager Referral \\
-                        \midrule
-                        """ + "".join([f"{row['Date of assessment']} & {row['LEVEL #1 TOTAL']} & {row['LEVEL #1 AVERAGE']} & {row['LEVEL #1 STATUS']} & {row['LEVEL #2 TOTAL']} & {row['LEVEL #2 AVERAGE']} & {row['LEVEL #2 STATUS']} & {row['LEVEL #3 TOTAL']} & {row['LEVEL #3 AVERAGE']} & {row['LEVEL #3 STATUS']} & {row.get('Manager Referral', 'N/A')} \\\\\n" for _, row in trainer_report.iterrows()]) + r"""
-                        \bottomrule
-                        \end{longtable}
-                        
-                        \newpage
-                        
-                        \section*{Course Details}
-                        """ + "".join([
-                            r"\subsection*{" + level + r"}" + "\n" +
-                            r"\begin{longtable}{l l}" + "\n" +
-                            r"\toprule" + "\n" +
-                            r"Course & Name \\" + "\n" +
-                            r"\midrule" + "\n" +
-                            "".join([f"{level} Course #{i} & {row.get(f'{level} Course #{i}', 'N/A')} \\\\\n" for i in range(1, 11)]) +
-                            r"\bottomrule" + "\n" +
-                            r"\end{longtable}" + "\n"
-                            for level in ["LEVEL #1", "LEVEL #2", "LEVEL #3"] for _, row in [trainer_report.iloc[-1:]]
-                        ]) + r"""
-                        
-                        \end{document}
-                        """
-                        with open("trainer_report.tex", "w") as f:
-                            f.write(latex_content)
-                        subprocess.run(["pdflatex", "trainer_report.tex"], check=True, capture_output=True)
-                        with open("trainer_report.pdf", "rb") as f:
-                            pdf_data = f.read()
-                        st.download_button(
-                            label="Download Trainer PDF",
-                            data=pdf_data,
-                            file_name=f"trainer_{trainer_id}_assessment.pdf",
-                            mime="application/pdf",
-                            key=f"download_button_pdf_{trainer_id}"
-                        )
-                        st.success("PDF download initiated.")
-                        for file in ["trainer_report.tex", "trainer_report.pdf", "trainer_report.aux", "trainer_report.log"]:
-                            if os.path.exists(file):
-                                os.remove(file)
-                    except subprocess.CalledProcessError as e:
-                        logger.error(f"Error compiling LaTeX to PDF: {str(e)}")
-                        st.error("Failed to compile PDF report. Ensure pdflatex is installed.")
-                    except Exception as e:
-                        logger.error(f"Error generating PDF: {str(e)}")
-                        st.error("Failed to generate PDF report.")
+                try:
+                    buffer = BytesIO()
+                    pdf = canvas.Canvas(buffer, pagesize=A4)
+                    pdf.setFont("Helvetica", 12)
+                    y = 750
+                    pdf.drawString(100, y, f"Trainer Assessment Report")
+                    y -= 20
+                    pdf.drawString(100, y, f"Generated on: {datetime.now().strftime('%d-%m-%Y %I:%M %p IST')}")
+                    y -= 20
+                    pdf.drawString(100, y, f"Trainer: {trainer_name} (ID: {trainer_id})")
+                    y -= 30
+                    pdf.drawString(100, y, "Assessment Records")
+                    y -= 20
+                    for _, row in trainer_report.iterrows():
+                        pdf.drawString(100, y, f"Date of Assessment: {row['Date of assessment']}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #1 TOTAL: {row['LEVEL #1 TOTAL']}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #1 AVERAGE: {row['LEVEL #1 AVERAGE']}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #1 STATUS: {row['LEVEL #1 STATUS']}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #2 TOTAL: {row['LEVEL #2 TOTAL']}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #2 AVERAGE: {row['LEVEL #2 AVERAGE']}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #2 STATUS: {row['LEVEL #2 STATUS']}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #3 TOTAL: {row['LEVEL #3 TOTAL']}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #3 AVERAGE: {row['LEVEL #3 AVERAGE']}")
+                        y -= 20
+                        pdf.drawString(100, y, f"LEVEL #3 STATUS: {row['LEVEL #3 STATUS']}")
+                        y -= 20
+                        pdf.drawString(100, y, f"Manager Referral: {row.get('Manager Referral', 'N/A')}")
+                        y -= 30
+                        if y < 50:
+                            pdf.showPage()
+                            pdf.setFont("Helvetica", 12)
+                            y = 750
+                    for level in ["LEVEL #1", "LEVEL #2", "LEVEL #3"]:
+                        pdf.drawString(100, y, f"{level} Courses")
+                        y -= 20
+                        for i in range(1, 11):
+                            course = trainer_report.iloc[-1].get(f"{level} Course #{i}", "N/A")
+                            pdf.drawString(100, y, f"Course #{i}: {course}")
+                            y -= 20
+                            if y < 50:
+                                pdf.showPage()
+                                pdf.setFont("Helvetica", 12)
+                                y = 750
+                    pdf.showPage()
+                    pdf.save()
+                    pdf_data = buffer.getvalue()
+                    buffer.close()
+                    st.download_button(
+                        label="Download Trainer PDF",
+                        data=pdf_data,
+                        file_name=f"trainer_{trainer_id}_assessment.pdf",
+                        mime="application/pdf",
+                        key=f"download_button_pdf_{trainer_id}"
+                    )
+                except Exception as e:
+                    logger.error(f"Error generating PDF: {str(e)}")
+                    st.error("Failed to generate PDF report.")
 
         if st.button("View All Trainers", key="view_all_trainers"):
             try:
@@ -730,6 +722,18 @@ def admin_section(df_main):
         if "logged_in" not in st.session_state or not st.session_state.get("logged_in"):
             st.warning("Please login to access the admin panel.")
             return
+
+        # Display list of existing evaluators at the top
+        evaluators_df = load_evaluators()
+        st.markdown("### 🧑‍💻 Existing Evaluators")
+        try:
+            if not evaluators_df.empty:
+                st.dataframe(evaluators_df[["username", "full_name", "email", "role", "created_at"]], use_container_width=True)
+            else:
+                st.info("No evaluators found in the system.")
+        except Exception as e:
+            logger.error(f"Error displaying evaluators list: {str(e)}")
+            st.error("Failed to display evaluators list.")
 
         cols = st.columns([1, 1, 1, 1])
         if cols[0].button("Add New Evaluator"):
@@ -861,92 +865,75 @@ def admin_section(df_main):
 
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    if st.button("📥 Download Trainer Report CSV", key=f"download_trainer_csv_{selected_trainer}"):
-                        try:
-                            csv_data = trainer_reports.to_csv(index=False)
-                            st.download_button(
-                                label="Download Trainer Report CSV",
-                                data=csv_data,
-                                file_name=f"trainer_{selected_trainer}_reports.csv",
-                                mime="text/csv",
-                                key=f"download_button_trainer_csv_{selected_trainer}"
-                            )
-                            st.success("CSV download initiated.")
-                        except Exception as e:
-                            logger.error(f"Error downloading CSV: {str(e)}")
-                            st.error("Failed to download CSV file.")
+                    csv_data = trainer_reports.to_csv(index=False)
+                    st.download_button(
+                        label="Download Trainer Report CSV",
+                        data=csv_data,
+                        file_name=f"trainer_{selected_trainer}_reports.csv",
+                        mime="text/csv",
+                        key=f"download_button_trainer_csv_{selected_trainer}"
+                    )
                 with col2:
-                    if st.button("📥 Download All Filtered Reports CSV", key="download_filtered_csv"):
-                        try:
-                            csv_data = filtered.to_csv(index=False)
-                            st.download_button(
-                                label="Download All Filtered Reports CSV",
-                                data=csv_data,
-                                file_name="filtered_trainer_reports.csv",
-                                mime="text/csv",
-                                key="download_button_filtered_csv"
-                            )
-                            st.success("CSV download initiated.")
-                        except Exception as e:
-                            logger.error(f"Error downloading CSV: {str(e)}")
-                            st.error("Failed to download CSV file.")
+                    csv_data_all = filtered.to_csv(index=False)
+                    st.download_button(
+                        label="Download All Filtered Reports CSV",
+                        data=csv_data_all,
+                        file_name="filtered_trainer_reports.csv",
+                        mime="text/csv",
+                        key="download_button_filtered_csv"
+                    )
                 with col3:
-                    if st.button("📄 Download Evaluators/Trainers PDF", key="download_admin_pdf"):
-                        try:
-                            latex_content = r"""
-                            \documentclass{article}
-                            \usepackage[utf8]{inputenc}
-                            \usepackage{geometry}
-                            \geometry{a4paper, margin=1in}
-                            \usepackage{longtable}
-                            \usepackage{booktabs}
-
-                            \begin{document}
-
-                            \section*{Evaluator and Trainer Report}
-                            \subsection*{Generated on: """ + datetime.now().strftime("%d-%m-%Y %I:%M %p IST") + r"""}
-                            \subsubsection*{Evaluators}
-                            \begin{longtable}{l l l l l}
-                            \toprule
-                            Username & Full Name & Email & Role & Created At \\
-                            \midrule
-                            """ + "".join([f"{row['username']} & {row['full_name']} & {row['email']} & {row['role']} & {row['created_at']} \\\\\n" for _, row in evaluators_df.iterrows()]) + r"""
-                            \bottomrule
-                            \end{longtable}
-
-                            \subsubsection*{Trainers}
-                            \begin{longtable}{l l l l}
-                            \toprule
-                            Trainer ID & Trainer Name & Branch & Department \\
-                            \midrule
-                            """ + ("" if not os.path.exists(DEFAULT_DATA_FILE) else "".join([f"{row['Trainer ID']} & {row['Trainer Name']} & {row['Branch']} & {row['Department']} \\\\\n" for _, row in pd.read_csv(DEFAULT_DATA_FILE).iterrows()])) + r"""
-                            \bottomrule
-                            \end{longtable}
-
-                            \end{document}
-                            """
-                            with open("admin_report.tex", "w") as f:
-                                f.write(latex_content)
-                            subprocess.run(["pdflatex", "admin_report.tex"], check=True, capture_output=True)
-                            with open("admin_report.pdf", "rb") as f:
-                                pdf_data = f.read()
-                            st.download_button(
-                                label="Download Evaluators/Trainers PDF",
-                                data=pdf_data,
-                                file_name="evaluators_trainers_report.pdf",
-                                mime="application/pdf",
-                                key="download_button_admin_pdf"
-                            )
-                            st.success("PDF download initiated.")
-                            for file in ["admin_report.tex", "admin_report.pdf", "admin_report.aux", "admin_report.log"]:
-                                if os.path.exists(file):
-                                    os.remove(file)
-                        except subprocess.CalledProcessError as e:
-                            logger.error(f"Error compiling LaTeX to PDF: {str(e)}")
-                            st.error("Failed to compile PDF report. Ensure pdflatex is installed.")
-                        except Exception as e:
-                            logger.error(f"Error generating PDF: {str(e)}")
-                            st.error("Failed to generate PDF report.")
+                    try:
+                        buffer = BytesIO()
+                        pdf = canvas.Canvas(buffer, pagesize=A4)
+                        pdf.setFont("Helvetica", 12)
+                        y = 750
+                        pdf.drawString(100, y, "Evaluator and Trainer Report")
+                        y -= 20
+                        pdf.drawString(100, y, f"Generated on: {datetime.now().strftime('%d-%m-%Y %I:%M %p IST')}")
+                        y -= 30
+                        pdf.drawString(100, y, "Evaluators")
+                        y -= 20
+                        pdf.setFillColor(colors.black)
+                        pdf.drawString(100, y, "Username  Full Name  Email  Role  Created At")
+                        y -= 20
+                        for _, row in evaluators_df.iterrows():
+                            text = f"{row['username']}  {row['full_name']}  {row['email']}  {row['role']}  {row['created_at']}"
+                            pdf.drawString(100, y, text)
+                            y -= 20
+                            if y < 50:
+                                pdf.showPage()
+                                pdf.setFont("Helvetica", 12)
+                                y = 750
+                        y -= 20
+                        pdf.drawString(100, y, "Trainers")
+                        y -= 20
+                        pdf.drawString(100, y, "Trainer ID  Trainer Name  Branch  Department")
+                        y -= 20
+                        if os.path.exists(DEFAULT_DATA_FILE):
+                            trainers_df = pd.read_csv(DEFAULT_DATA_FILE)
+                            for _, row in trainers_df.iterrows():
+                                text = f"{row['Trainer ID']}  {row['Trainer Name']}  {row.get('Branch', '')}  {row.get('Department', '')}"
+                                pdf.drawString(100, y, text)
+                                y -= 20
+                                if y < 50:
+                                    pdf.showPage()
+                                    pdf.setFont("Helvetica", 12)
+                                    y = 750
+                        pdf.showPage()
+                        pdf.save()
+                        pdf_data = buffer.getvalue()
+                        buffer.close()
+                        st.download_button(
+                            label="Download Evaluators/Trainers PDF",
+                            data=pdf_data,
+                            file_name="evaluators_trainers_report.pdf",
+                            mime="application/pdf",
+                            key="download_button_admin_pdf"
+                        )
+                    except Exception as e:
+                        logger.error(f"Error generating PDF: {str(e)}")
+                        st.error("Failed to generate PDF report.")
 
         if st.button("Logout", key="admin_logout"):
             try:
